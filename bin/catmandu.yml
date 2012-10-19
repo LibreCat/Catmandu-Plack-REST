@@ -1,0 +1,10 @@
+store:
+  default:
+    package: ElasticSearch
+    options:
+      index_name: quotes
+      bags: { quotes }
+
+exporter:
+  default:
+    package: JSON
