@@ -3,96 +3,105 @@ package Catmandu::Plack::Restify;
 use Moo;
 use Catmandu;
 use Catmandu::Sane;
+use Catmandu::Util qw( :is );
 use Plack::Request;
 use Plack::Response;
 use parent qw( Plack::Component );
 use JSON;
 
-has strict => ( is => 'ro', default => sub { 1 } );
-has resources => ( is => 'ro' );
+# options.
+
+has strict => (
+  is => 'ro',
+  default => sub { 1 }
+);
+
+has resources => (
+  is => 'ro'
+);
+
+has readonly => (
+  is => 'ro',
+  default => sub { 0 }
+);
+
+# override.
 
 sub call {
   my ($self, $env) = @_;
+
   my $req = Plack::Request->new($env);
-
-  my $data;
-  my $err;
-
-  eval {
-    $data = $self->_handle($req);
-  } or do {
-    $err = $@;
-  };
-
-  my $status;
-  my $json;
-
-  if ($err) {
-    $status = 500;
-    $json = encode_json( { error => $err } );
-  } else {
-    $status = $self->_status_code($req, $data);
-    $json = $data ? encode_json($data) : '';
-  }
-
+  my $data = $self->_handle($req);
+  my $status = $self->_status_code($req, $data);
+  my $json = $data ? encode_json($data) : '';
   my $res = $self->_response($status, $json);
 
   return $res;
 }
 
+# internal.
+
 sub _handle {
   my ($self, $req) = @_;
-  my $out;
-  my $method = $req->method;
-  my $path = substr($req->path, 1);
 
+  # http method
+  my $method = $req->method;
+
+  # parse path
+  my $path = substr($req->path, 1);
   my @a = split(/\//, $path);
   $self->{collection} = $a[0];
   my $id = $a[1];
 
+  # collection, resource or search mode?
   my $mode = $self->_mode($id);
 
   # GET /
-  if ($path eq '') {
-    $out = {
-      'Catmandu::Plack::Restify' => 'is running!'
-    };
+  if ( $path eq '' ) {
+    return { '200' => 'OK' };
   }
 
   # GET /quotes/search/query
-  if ($method eq 'GET' && $mode eq 'search' && $self->_store_is_searchable) {
+  if ( ( $method eq 'GET' or $method eq 'HEAD' ) && $mode eq 'search' && $self->_store_is_searchable ) {
     my $query = $a[2];
-    $out = $self->_search($query);
+    return $self->_search($query);
   }
 
   # GET /quotes
-  if ($method eq 'GET' && $mode eq 'collection') {
-    $out = $self->_list;
+  if ( $method eq 'GET' && $mode eq 'collection' ) {
+    return $self->_list;
   }
 
   # GET /quotes/1
-  if ($method eq 'GET' && $mode eq 'resource') {
-    $out = $self->_get($id);
+  if ( $method eq 'GET' && $mode eq 'resource' ) {
+    return $self->_get($id);
   }
 
   # POST /quotes
-  if ($method eq 'POST' && $mode eq 'collection') {
+  if ( $method eq 'POST' && $mode eq 'collection' ) {
+    return { '405' => 'Method Not Allowed' } if $self->readonly;
+
     my $data = decode_json( $req->content );
-    $out = $self->_add($data);
+    return $self->_add($data);
   }
 
   # PUT /quotes/1
-  if ($method eq 'PUT' && $mode eq 'resource') {
+  if ( ( $method eq 'PUT' or $method eq 'PATCH' ) && $mode eq 'resource' ) {
+    return { '405' => 'Method Not Allowed' } if $self->readonly;
+
     my $data = decode_json( $req->content );
-    $out = $self->_update($id, $data);
+    return $self->_update($id, $data);
   }
 
   # DEL /quotes/1
-  if ($method eq 'DEL' && $mode eq 'resource') {
-    $out = $self->_delete($id);
+  if ( $method eq 'DEL' && $mode eq 'resource' ) {
+    return { '405' => 'Method Not Allowed' } if $self->readonly;
+
+    return $self->_delete($id);
   }
 
-  return $out;
+  # if we get here, no match was found.
+  return { '400' => 'Bad Request' };
 }
 
 sub _mode {
@@ -124,37 +133,35 @@ sub _response {
 
 sub _status_code {
   my ($self, $req, $data) = @_;
-  my $out;
 
-  # state %STATUS = {
-  #   200 => 'OK',
-  #   201 => 'Created',
-  #   204 => 'No Content',
-  #   400 => 'Bad Request',
-  #   404 => 'Not Found',
-  #   405 => 'Method Not Allowed',
-  #   500 => 'Internal Server Error'
-  # };
+ my %STATUS = (
+    200 => 'OK',
+    201 => 'Created',
+    204 => 'No Content',
+    400 => 'Bad Request',
+    404 => 'Not Found',
+    405 => 'Method Not Allowed',
+    500 => 'Internal Server Error'
+  );
 
-  given($req->method) {
-    when('GET') {
-      $out = $data ? 200 : 404;
-    }
-    when ('POST') {
-      $out = 201;
-    }
-    when ('PUT') {
-      $out = 200;
-    }
-    when ('DEL') {
-      $out = $data ? 204 : 500;
+  if ( is_hash_ref($data) ) {
+    for ( keys %STATUS ) {
+      return $_ if exists $data->{$_};
     }
   }
 
-  return $out;
+  given($req->method) {
+    return $data ? 200 : 404 when [ 'GET', 'HEAD' ];
+    return 201 when 'POST';
+    return 200 when [ 'PUT', 'PATCH' ];
+    return $data ? 204 : 500 when 'DEL';
+  }
+
+  # if we get here, no match was found.
+  return { '400' => 'Bad Request' };
 }
 
-# store related. ---------------------------------------------------------------
+# store related.
 
 sub _store {
   my ($self) = @_;
@@ -174,17 +181,9 @@ sub _store {
 
 sub _exists {
   my ($self, $value, @collection) = @_;
-
   my $i = 0;
-
-  while ($i <= $#collection && $collection[$i] ne $value ) {
-    ++$i;
-  }
-
-  if ($i <= $#collection) {
-    return 1;
-  }
-
+  while ($i <= $#collection && $collection[$i] ne $value ) { ++$i; }
+  if ($i <= $#collection) { return 1; }
   return 0;
 }
 

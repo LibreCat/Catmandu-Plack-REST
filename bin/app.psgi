@@ -14,7 +14,8 @@ my $builder = Plack::Builder->new();
 # Create our PSGI app.
 my $api = Catmandu::Plack::Restify->new(
   strict => 1,
-  resources => [ 'quotes', 'authors' ]
+  resources => [ 'quotes', 'authors' ],
+  readonly => 0
 );
 
 # Mount our app.
