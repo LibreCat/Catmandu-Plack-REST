@@ -1,0 +1,10 @@
+store:
+  default:
+    package: Hash
+    options:
+      index_name: quotes
+      bags: { quotes }
+
+exporter:
+  default:
+    package: JSON
