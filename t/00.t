@@ -8,10 +8,6 @@ use Catmandu;
 use Catmandu::Sane;
 use HTTP::Request::Common;
 
-# Configuration.
-
-Catmandu->load;
-
 # App.
 
 my $pkg;
@@ -19,25 +15,37 @@ BEGIN {
     $pkg = 'Catmandu::Plack::Restify';
     use_ok $pkg;
 }
-
 require_ok $pkg;
+
+Catmandu->load;
 
 my $app = Catmandu::Plack::Restify->new(
   strict => 1,
-  resources => [ 'quotes', 'authors' ],
-  readonly => 1
+  resources => [ 'quotes', 'authors' ]
 );
 
-# Client.
+# Tests.
 
-my $client = sub {
+my $get = sub {
    my $cb  = shift;
-   my $res = $cb->( GET "/" );
-   is $res->content, '{"200":"OK"}';
+   my $res = $cb->( GET "/quotes" );
+   is $res->code, '200';
 };
 
-# Test.
+test_psgi app => $app, client => $get;
 
-test_psgi app => $app, client => $client;
+my $post = sub {
+  my $cb  = shift;
+  my $res = $cb->(
+    POST '/quotes',
+    Content_Type => 'application/json',
+   Content => '{ "quote" : "testing", "author" : "testmore" }'
+  );
+  is $res->code, '201';
+};
 
-done_testing 3;
+test_psgi app => $app, client => $post;
+
+# Done.
+
+done_testing 4;
