@@ -1,5 +1,7 @@
 Catmandu-Plack-REST
 -------------------
+# New core maintainer
+  Patrick Hochstenbach
 
 # TODO:
 
